@@ -24,5 +24,3 @@ row = [profile['profileName'],datetime,profile['totalNumberOfFollowing'],profile
 
 df = pd.DataFrame(columns=[headers], data=[row])
 df.to_csv('tableau_public_stats.csv', index=False)
-
-#print(df)
