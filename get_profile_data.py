@@ -1,10 +1,12 @@
-import requests
 import json
 import datetime
 import pandas as pd
+import urllib3
 
-profile = json.loads(requests.get("https://public.tableau.com/profile/api/wjsutton").text)
-workbooks = json.loads(requests.get("https://public.tableau.com/profile/api/wjsutton/workbooks?count=300&index=0").text)
+http = urllib3.PoolManager()
+
+profile = json.loads(http.request('GET',"https://public.tableau.com/profile/api/wjsutton").data)
+workbooks = json.loads(http.request('GET',"https://public.tableau.com/profile/api/wjsutton/workbooks?count=300&index=0").data)
 datetime = datetime.datetime.now()
 
 all_favs = []
