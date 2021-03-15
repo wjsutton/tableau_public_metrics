@@ -1,1 +1,3 @@
 aws_lambda_pandas_layer/*
+.Rproj.user
+inital_workings.R
