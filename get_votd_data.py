@@ -1,65 +1,19 @@
 import json
-import datetime
 import pandas as pd
 import urllib3
-from pandas.io.json import json_normalize
 import numpy as np
 import re
 
-def flatten_nested_json_df(df):
-
-    df = df.reset_index()
-
-    print(f"original shape: {df.shape}")
-    print(f"original columns: {df.columns}")
-
-
-    # search for columns to explode/flatten
-    s = (df.applymap(type) == list).all()
-    list_columns = s[s].index.tolist()
-
-    s = (df.applymap(type) == dict).all()
-    dict_columns = s[s].index.tolist()
-
-    print(f"lists: {list_columns}, dicts: {dict_columns}")
-    while len(list_columns) > 0 or len(dict_columns) > 0:
-        new_columns = []
-
-        for col in dict_columns:
-            print(f"flattening: {col}")
-            # explode dictionaries horizontally, adding new columns
-            horiz_exploded = pd.json_normalize(df[col]).add_prefix(f'{col}.')
-            horiz_exploded.index = df.index
-            df = pd.concat([df, horiz_exploded], axis=1).drop(columns=[col])
-            new_columns.extend(horiz_exploded.columns) # inplace
-
-        for col in list_columns:
-            print(f"exploding: {col}")
-            # explode lists vertically, adding new columns
-            df = df.drop(columns=[col]).join(df[col].explode().to_frame())
-            new_columns.append(col)
-
-        # check if there are still dict o list fields to flatten
-        s = (df[new_columns].applymap(type) == list).all()
-        list_columns = s[s].index.tolist()
-
-        s = (df[new_columns].applymap(type) == dict).all()
-        dict_columns = s[s].index.tolist()
-
-        print(f"lists: {list_columns}, dicts: {dict_columns}")
-
-    print(f"final shape: {df.shape}")
-    print(f"final columns: {df.columns}")
-    return df
-
 http = urllib3.PoolManager()
-votd = json.loads(http.request('GET',"https://public.tableau.com/api/gallery?page=0&count=10000&galleryType=viz-of-the-day&language=en-us").data)
+votd = json.loads(http.request('GET',"https://public.tableau.com/api/gallery?page=0&count=10000&galleryType=viz-of-the-day&language=any").data)
 df = pd.json_normalize(votd['items'], max_level=0)
 
+# initialise dataframes
 workbook_df =[]
+attributions_df = []
 
 for i in df.index:
-
+    print(i)
     workbook_url = 'https://public.tableau.com/profile/api/single_workbook/' + votd['items'][i]['workbookRepoUrl']
     workbook = json.loads(http.request('GET',workbook_url).data)
     workbook = pd.json_normalize(workbook)
@@ -74,24 +28,50 @@ for i in df.index:
             workbook = pd.json_normalize(workbook)
             workbook['workbookRepoUrl'] = votd['items'][i]['workbookRepoUrl']
 
-    workbook_df.append(workbook)
+    if 'error.message' not in workbook.columns:
+        attributions = pd.json_normalize(workbook['attributions'][0])
+        attributions['workbookRepoUrl'] = votd['items'][i]['workbookRepoUrl']
+
+        workbook_df.append(workbook)
+        attributions_df.append(attributions)
 
 # see pd.concat documentation for more info
 workbook_df = pd.concat(workbook_df)
+attributions_df = pd.concat(attributions_df)
 
+# join VOTD with workbook and attributions dataframes
 df = pd.merge(df,workbook_df, on='workbookRepoUrl',how='left')
+df = pd.merge(df,attributions_df, on='workbookRepoUrl',how='left')
+
+# remove columns that have been json_normalized to additional columns
 del df['workbook']
+del df['attributions']
+
+# if there are error messages remove them
 if 'error.message' in df.columns:
     del df['error.message']
     del df['error.id']
 
+# convert lists to comma seperated strings
 df['types'] = [','.join(map(str, l)) for l in df['types']]
 df['topics'] = [','.join(map(str, l)) for l in df['topics']]
 df['badges'] = [','.join(map(str, l)) for l in df['badges']]
-df['attributions'] = np.where(len(df['attributions'])>0,True,False) #[','.join(map(str, l)) for l in df['attributions']]
+
+# rename attribution columns
+df.rename(columns={'authorProfileName_y':'attributed_authorProfileName'}, inplace=True)
+df.rename(columns={'workbookName':'attributed_workbookName'}, inplace=True)
+df.rename(columns={'authorDisplayName':'attributed_authorDisplayName'}, inplace=True)
+df.rename(columns={'workbookViewName':'attributed_workbookViewName'}, inplace=True)
+
+# rename conflicts between gallery and workbook data
+df.rename(columns={'authorProfileName_x':'authorProfileName'}, inplace=True)
+df.rename(columns={'title_x':'gallery_title'}, inplace=True)
+df.rename(columns={'description_x':'gallery_description'}, inplace=True)
+df.rename(columns={'title_y':'viz_title'}, inplace=True)
+df.rename(columns={'description_y':'viz_description'}, inplace=True)
 
 df = df.drop_duplicates()
-#print(df)
-print(len(df))
-#workbooks.to_csv('tableau_public_workbooks.csv', index=False)
-df.to_csv('tableau_public_votd.csv', index=False)
+
+# Save locally
+df.to_csv('data/tableau_public_votd.csv', index=False)
+
